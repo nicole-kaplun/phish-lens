@@ -1,13 +1,22 @@
+import html
 from enum import Enum
-
-from pydantic import BaseModel, ConfigDict, Field
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Link(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """A link as it appears in the email's HTML, entities still encoded.
 
+    Browsers decode every HTML entity before following a link, so
+    "paypa1&period;com" opens paypa1.com. Decoding happens here, once, with
+    Python's full HTML5 entity table, so every check sees what a browser would.
+    """
+    model_config = ConfigDict(extra="forbid")
     href: str = Field(max_length=2_048)
     text: str = Field(default="", max_length=500)
+
+    @field_validator("href", "text")
+    @classmethod
+    def _decode_entities(cls, value: str) -> str:
+        return html.unescape(value)
 
 
 class Attachment(BaseModel):
@@ -20,7 +29,6 @@ class Attachment(BaseModel):
 
 class EmailPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     from_header: str = Field(max_length=4_000)
     reply_to: str = Field(default="", max_length=4_000)
     subject: str = Field(default="", max_length=4_000)
@@ -29,18 +37,8 @@ class EmailPayload(BaseModel):
     links: list[Link] = Field(default_factory=list, max_length=100)
     attachments: list[Attachment] = Field(default_factory=list, max_length=20)
 
-
 class Severity(str, Enum):
-    INFO = "info"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
+    INFO = "info"; LOW = "low"; MEDIUM = "medium"; HIGH = "high"; CRITICAL = "critical"
 
 class Finding(BaseModel):
-    analyzer: str
-    title: str
-    detail: str
-    severity: Severity
-    points: int
+    analyzer: str; title: str; detail: str; severity: Severity; points: int

@@ -24,3 +24,11 @@ def test_xray_uses_host_a_browser_would_visit(client):
     rows = client.post("/analyze", json=email(links=[
         {"href": "https://paypal.com@evil.com/login", "text": "Click"}])).json()["link_xray"]["rows"]
     assert rows[0]["opens"] == "evil.com" and rows[0]["flagged"]
+
+
+def test_html_entities_are_decoded_like_a_browser(client):
+    # Named entities the add-on used to miss: "&period;" is ".", "&sol;" is "/".
+    result = client.post("/analyze", json=email(links=[
+        {"href": "https&colon;&sol;&sol;paypa1&period;com/login", "text": "paypal&period;com"}])).json()
+    assert result["link_xray"]["rows"][0] == {"shown": "paypal.com", "opens": "paypa1.com", "flagged": True}
+    assert "Link to a domain imitating PayPal" in [f["title"] for f in result["findings"]]

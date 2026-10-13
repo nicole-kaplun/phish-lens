@@ -106,19 +106,21 @@ function getAuthenticationResults_(message) {
 /**
  * Collects <a href> targets and their visible text. We only read the HTML,
  * never render it. Accepts double-quoted, single-quoted and unquoted href
- * values. A regex is not a full HTML parser (Apps Script has none for HTML);
+ * values. "href" must follow whitespace, so data-href="..." is not mistaken
+ * for the real target. HTML entities are left as they are: the backend
+ * decodes them with Python's full HTML5 table, the way a browser would.
+ * A regex is not a full HTML parser (Apps Script has none for HTML);
  * see the README limitations.
  */
 function extractLinks_(html) {
   var links = [];
-  var re = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
+  var re = /<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
   var m;
   while ((m = re.exec(html)) !== null && links.length < LIMITS.LINKS) {
     var href = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
     links.push({
-      href: truncate_(decodeEntities_(href.trim()), LIMITS.HREF_CHARS),
-      text: truncate_(decodeEntities_(m[4].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(),
-                      LIMITS.LINK_TEXT_CHARS),
+      href: truncate_(href.trim(), LIMITS.HREF_CHARS),
+      text: truncate_(m[4].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), LIMITS.LINK_TEXT_CHARS),
     });
   }
   return links;
@@ -171,7 +173,11 @@ function buildResultCard_(result) {
   // "no warning signs" while listing one.
   var advice = verdict.advice;
   if (result.verdict === 'safe') {
-    advice = findings.length > 0 ? 'Only weak warning signs found. Stay alert.' : verdict.advice;
+    if (findings.length > 0) {
+      advice = 'Only weak warning signs found. Stay alert.';
+    } else if (incomplete.length > 0) {
+      advice = 'No warning signs found in the checks that ran.';
+    }
     if (incomplete.length > 0) {
       advice += ' ' + incomplete.length + (incomplete.length === 1 ? ' check' : ' checks') +
         ' could not run. See Notes.';
@@ -187,8 +193,9 @@ function buildResultCard_(result) {
 
   var reasons = CardService.newCardSection().setHeader('Why');
   if (findings.length === 0) {
-    reasons.addWidget(CardService.newTextParagraph()
-      .setText('Checked sender authentication, sender identity, reply address, links, attachments and wording.'));
+    reasons.addWidget(CardService.newTextParagraph().setText(incomplete.length > 0
+      ? 'The checks that ran found nothing. The ones that could not run are listed under Notes.'
+      : 'Checked sender authentication, sender identity, reply address, links, attachments and wording.'));
   }
   findings.forEach(function (f) {
     reasons.addWidget(CardService.newDecoratedText()
@@ -260,22 +267,6 @@ function escape_(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-/**
- * Turns HTML character references back into characters, so that
- * "paypal&#46;com" and "paypal&#x2e;com" are seen as "paypal.com".
- * &amp; is decoded last, so "&amp;#46;" stays the literal text "&#46;".
- */
-function decodeEntities_(s) {
-  function fromCode(code, original) {
-    return code > 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : original;
-  }
-  return s
-    .replace(/&#x([0-9a-f]+);?/gi, function (m, hex) { return fromCode(parseInt(hex, 16), m); })
-    .replace(/&#(\d+);?/g, function (m, dec) { return fromCode(parseInt(dec, 10), m); })
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
 }
 
 function truncate_(s, max) {
