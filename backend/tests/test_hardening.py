@@ -56,3 +56,14 @@ def test_repeated_weak_attachments_count_once(client):
 def test_missing_authentication_is_reported_honestly():
     [finding] = authentication.analyze(EmailPayload(from_header="a@b.com"))
     assert finding.title == "Authentication results unavailable" and finding.points == 0
+
+
+
+def test_a_crashing_check_does_not_hide_the_others(client, monkeypatch):
+    def broken(email):
+        raise RuntimeError("bug")
+    monkeypatch.setattr(attachments, "analyze", broken)
+    result = client.post("/analyze", json=email(from_header="service@paypal.com <x@evil.com>")).json()
+    titles = [f["title"] for f in result["findings"]]
+    assert result["verdict"] == "malicious"                 # the other checks still ran
+    assert "Attachments check unavailable" in titles        # and the gap is reported
