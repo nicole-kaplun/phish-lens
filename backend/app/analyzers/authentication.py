@@ -27,11 +27,11 @@ def _trusted_header(headers: list[str]) -> str | None:
 _PENALTIES = {
     ("dmarc", "fail"): (35, Severity.HIGH,
         "DMARC failed: the sender's domain does not confirm this message came from them."),
-    ("spf", "fail"): (20, Severity.MEDIUM,
+    ("spf", "fail"): (20, Severity.LOW,
         "SPF failed: the sending server is not authorized to send for this domain."),
     ("spf", "softfail"): (10, Severity.LOW,
         "SPF soft-failed: the sending server is probably not authorized for this domain."),
-    ("dkim", "fail"): (15, Severity.MEDIUM,
+    ("dkim", "fail"): (15, Severity.LOW,
         "DKIM failed: the signature is invalid, so the message may have been altered."),
 }
 
@@ -39,12 +39,16 @@ _PENALTIES = {
 def analyze(email: EmailPayload) -> list[Finding]:
     header = _trusted_header(email.authentication_results)
     if header is None:
+        # Gmail stamps every message that arrives from outside. No stamp means
+        # the message never came from outside (e.g. sent within the same
+        # account), so there is nothing to authenticate and no added risk.
         return [Finding(
             analyzer=NAME,
-            title="No trusted authentication results",
-            detail="Gmail's own SPF/DKIM/DMARC results were not found for this message.",
-            severity=Severity.LOW,
-            points=10,
+            title="Sent within Gmail",
+            detail="This message did not arrive from an outside server, so sender "
+                   "authentication does not apply.",
+            severity=Severity.INFO,
+            points=0,
         )]
 
     results = {mech.lower(): res.lower() for mech, res in _RESULT_RE.findall(header)}
