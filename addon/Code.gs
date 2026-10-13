@@ -4,6 +4,15 @@
  * The add-on only collects what the backend needs and shows the result.
  * All detection logic and any API keys live in the backend, so nothing
  * sensitive is stored here (this file is public on GitHub).
+ *
+ * What leaves Gmail, to the PhishLens backend only:
+ *   - From and Reply-To headers, Gmail's Authentication-Results headers
+ *   - link targets and their visible text
+ *   - attachment names, types, sizes and SHA-256 hashes (never contents)
+ *   - the subject and the FIRST 1,500 CHARACTERS of the plain-text body
+ * The backend forwards the subject and that excerpt to Gemini on Vertex AI
+ * for wording analysis, except for DMARC-verified mail from known brands.
+ * Text after the first 1,500 characters is never analysed.
  */
 
 var LIMITS = {
@@ -17,7 +26,7 @@ var LIMITS = {
 };
 
 var VERDICTS = {
-  safe:       { label: 'Safe',       color: '#188038', advice: 'No warning signs found.' },
+  safe:       { label: 'Low risk',   color: '#188038', advice: 'No warning signs found in any check.' },
   suspicious: { label: 'Suspicious', color: '#E37400', advice: 'Check before you click links or open attachments.' },
   malicious:  { label: 'Malicious',  color: '#D93025', advice: 'Do not click links or open attachments. Report and delete.' },
 };
@@ -67,15 +76,21 @@ function getAuthenticationResults_(message) {
     .slice(0, 10);
 }
 
-/** Collects <a href> targets and their visible text. We only read the HTML, never render it. */
+/**
+ * Collects <a href> targets and their visible text. We only read the HTML,
+ * never render it. Accepts double-quoted, single-quoted and unquoted href
+ * values. A regex is not a full HTML parser (Apps Script has none for HTML);
+ * see the README limitations.
+ */
 function extractLinks_(html) {
   var links = [];
-  var re = /<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  var re = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
   var m;
   while ((m = re.exec(html)) !== null && links.length < LIMITS.LINKS) {
+    var href = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
     links.push({
-      href: truncate_(decodeEntities_(m[1].trim()), LIMITS.HREF_CHARS),
-      text: truncate_(decodeEntities_(m[2].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(),
+      href: truncate_(decodeEntities_(href.trim()), LIMITS.HREF_CHARS),
+      text: truncate_(decodeEntities_(m[4].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(),
                       LIMITS.LINK_TEXT_CHARS),
     });
   }
@@ -123,13 +138,21 @@ function buildResultCard_(result) {
   var all = result.findings || [];
   var findings = all.filter(function (f) { return f.points > 0; });
   var notes = all.filter(function (f) { return f.points === 0; });
+  var incomplete = notes.filter(function (f) { return /unavailable/i.test(f.title); });
+
+  // "Low risk" must never silently mean "not checked".
+  var advice = verdict.advice;
+  if (result.verdict === 'safe' && incomplete.length > 0) {
+    advice = 'No warning signs in the checks that ran, but ' + incomplete.length +
+      (incomplete.length === 1 ? ' check' : ' checks') + ' could not run. See Notes.';
+  }
 
   var summary = CardService.newCardSection()
     .addWidget(CardService.newDecoratedText()
       .setTopLabel('Verdict')
       .setText('<font color="' + verdict.color + '"><b>' + verdict.label + '</b></font>')
       .setBottomLabel('Risk score: ' + Number(result.score) + ' / 100'))
-    .addWidget(CardService.newTextParagraph().setText(verdict.advice));
+    .addWidget(CardService.newTextParagraph().setText(advice));
 
   var reasons = CardService.newCardSection().setHeader('Why');
   if (findings.length === 0) {
@@ -208,10 +231,20 @@ function escape_(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-/** href="...&amp;..." in HTML means "&" in the real URL. */
+/**
+ * Turns HTML character references back into characters, so that
+ * "paypal&#46;com" and "paypal&#x2e;com" are seen as "paypal.com".
+ * &amp; is decoded last, so "&amp;#46;" stays the literal text "&#46;".
+ */
 function decodeEntities_(s) {
-  return s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+  function fromCode(code, original) {
+    return code > 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : original;
+  }
+  return s
+    .replace(/&#x([0-9a-f]+);?/gi, function (m, hex) { return fromCode(parseInt(hex, 16), m); })
+    .replace(/&#(\d+);?/g, function (m, dec) { return fromCode(parseInt(dec, 10), m); })
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
 }
 
 function truncate_(s, max) {
