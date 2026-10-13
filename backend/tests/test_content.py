@@ -119,3 +119,17 @@ def test_brand_name_without_dmarc_is_still_analysed(model):
     spoofed = EmailPayload(**GOOGLE_ALERT, authentication_results=["mx.google.com; dmarc=fail"])
     [finding] = content.analyze(spoofed)
     assert finding.title == "Manipulative language"
+
+ 
+
+def test_two_tactics_together_ask_the_user_to_check(model):
+    model(gemini_says([{"tactic": "secrecy", "quote": "Don't tell anyone"},
+                       {"tactic": "urgency", "quote": "for a client today"}]))
+    [finding] = content.analyze(CEO_FRAUD)
+    assert finding.points == 18 and finding.severity.value == "medium"
+
+
+def test_one_mild_tactic_alone_stays_low(model):
+    model(gemini_says([{"tactic": "urgency", "quote": "for a client today"}]))
+    [finding] = content.analyze(CEO_FRAUD)
+    assert finding.severity.value == "low"

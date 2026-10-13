@@ -167,11 +167,15 @@ function buildResultCard_(result) {
   var notes = all.filter(function (f) { return f.points === 0; });
   var incomplete = notes.filter(function (f) { return /unavailable/i.test(f.title); });
 
-  // "Low risk" must never silently mean "not checked".
+  // "Low risk" must never silently mean "not checked", and must not claim
+  // "no warning signs" while listing one.
   var advice = verdict.advice;
-  if (result.verdict === 'safe' && incomplete.length > 0) {
-    advice = 'No warning signs in the checks that ran, but ' + incomplete.length +
-      (incomplete.length === 1 ? ' check' : ' checks') + ' could not run. See Notes.';
+  if (result.verdict === 'safe') {
+    advice = findings.length > 0 ? 'Only weak warning signs found. Stay alert.' : verdict.advice;
+    if (incomplete.length > 0) {
+      advice += ' ' + incomplete.length + (incomplete.length === 1 ? ' check' : ' checks') +
+        ' could not run. See Notes.';
+    }
   }
 
   var summary = CardService.newCardSection()
