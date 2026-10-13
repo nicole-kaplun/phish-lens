@@ -90,3 +90,32 @@ def analyze(email: EmailPayload) -> list[Finding]:
             severity=severity, points=points,
         ))
     return findings
+
+def xray(email: EmailPayload, limit: int = 10) -> dict:
+    """What each link shows versus where it really goes, for the card.
+
+    Not a check: nothing here adds points. It lets the user see the gap
+    between link text and destination for themselves. Flagged links first.
+    """
+    rows, seen = [], set()
+    for link in email.links:
+        try:
+            parts = urlsplit(link.href.strip())
+            host = (parts.hostname or "").lower()
+            scheme = parts.scheme.lower()
+        except ValueError:
+            host, scheme = "", ""
+        if scheme in ("mailto", "tel"):
+            continue
+        shown = " ".join(link.text.split()) or "(no visible text)"
+        key = (shown, host)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "shown": _short(shown),
+            "opens": host or _short(link.href),
+            "flagged": bool(_check_link(link)),
+        })
+    rows.sort(key=lambda r: not r["flagged"])  # stable: flagged first, original order kept
+    return {"rows": rows[:limit], "total": len(rows)}

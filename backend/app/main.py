@@ -30,4 +30,6 @@ def analyze(email: EmailPayload, user: str = Depends(require_user)):
         + attachments.analyze(email)
         + reputation.analyze(email)
     )
-    return score(findings)
+    result = score(findings)
+    result["link_xray"] = links.xray(email)
+    return result
