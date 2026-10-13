@@ -9,7 +9,7 @@ import unicodedata
 # Brand keyword -> domains that legitimately send mail as that brand.
 BRANDS = {
     "paypal": ["paypal.com"],
-    "microsoft": ["microsoft.com", "office.com", "outlook.com"],
+    "microsoft": ["microsoft.com", "office.com"],
     "apple": ["apple.com"],
     "google": ["google.com"],
     "amazon": ["amazon.com"],

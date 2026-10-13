@@ -56,13 +56,22 @@ def _worst_problem(att: Attachment) -> tuple[str, str, Severity, int] | None:
                 f'"{shown}" is an archive, which can hide its contents from scanners.', Severity.LOW, 10)
     return None
 
-
 def analyze(email: EmailPayload) -> list[Finding]:
-    findings = []
+    # One finding per kind of problem: six ordinary .zip files are one weak
+    # signal repeated, not six times the evidence.
+    grouped: dict[str, list] = {}
     for att in email.attachments:
         problem = _worst_problem(att)
         if problem:
-            title, detail, severity, points = problem
-            findings.append(Finding(analyzer=NAME, title=title, detail=detail,
-                                    severity=severity, points=points))
+            title = problem[0]
+            if title in grouped:
+                grouped[title][4] += 1
+            else:
+                grouped[title] = [*problem, 1]
+
+    findings = []
+    for title, detail, severity, points, count in grouped.values():
+        more = f" ({count} attachments like this)" if count > 1 else ""
+        findings.append(Finding(analyzer=NAME, title=title, detail=detail + more,
+                                severity=severity, points=points))
     return findings

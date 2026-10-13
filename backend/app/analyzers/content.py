@@ -31,6 +31,7 @@ import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from pydantic import BaseModel, Field, ValidationError
 from app.analyzers.authentication import dmarc_passed
+from app.analyzers.reply_to import FREE_MAIL
 from app.brands import BRANDS, belongs_to
 from app.models import EmailPayload, Finding, Severity
 
@@ -126,7 +127,9 @@ def _verified_brand(email: EmailPayload) -> bool:
     """A known brand's real domain, with DMARC confirmed by Google."""
     domain = parseaddr(email.from_header)[1].rpartition("@")[2].lower()
     brand_domains = [d for domains in BRANDS.values() for d in domains]
-    return bool(domain) and belongs_to(domain, brand_domains) and dmarc_passed(email)
+    if not domain or domain in FREE_MAIL:  # a personal mailbox is never "the brand"
+        return False
+    return belongs_to(domain, brand_domains) and dmarc_passed(email)
 
 def _flatten(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()

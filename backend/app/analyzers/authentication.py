@@ -2,7 +2,9 @@
 
 Gmail records its own results in the Authentication-Results header.
 Only the header written by Google is trusted, because an attacker
-can add any header they like before sending.
+can add any header they like before sending. The header is parsed by
+its structure (authserv-id, then one result per ";"-separated part, with
+parenthesised comments removed), never by searching for words in it.
 """
 import re
 
@@ -11,17 +13,8 @@ from app.models import EmailPayload, Finding, Severity
 NAME = "authentication"
 TRUSTED_AUTHSERV_ID = "mx.google.com"
 
-_RESULT_RE = re.compile(r"\b(spf|dkim|dmarc)=(\w+)", re.IGNORECASE)
-
-def _trusted_header(headers: list[str]) -> str | None:
-    # Mail servers prepend their headers, so the topmost one was added by
-    # the last hop (Google). Anything below it may have been forged.
-    if not headers:
-        return None
-    topmost = headers[0]
-    if topmost.strip().lower().startswith(TRUSTED_AUTHSERV_ID):
-        return topmost
-    return None
+_COMMENT = re.compile(r"\([^()]*\)")
+_RESULT = re.compile(r"\s*(spf|dkim|dmarc)\s*=\s*([a-z]+)", re.IGNORECASE)
 
 # (mechanism, result) -> (points, severity, explanation for the user)
 _PENALTIES = {
@@ -36,22 +29,62 @@ _PENALTIES = {
 }
 
 
+def _strip_comments(header: str) -> str:
+    previous = None
+    while previous != header:  # nested comments: remove innermost first
+        previous, header = header, _COMMENT.sub(" ", header)
+    return header
+
+
+def parse_results(headers: list[str]) -> dict[str, str] | None:
+    """Google's verdict per mechanism, or None if the topmost header is not Google's.
+
+    Mail servers prepend headers, so only the topmost one was written by the
+    last hop. Its authserv-id must be exactly mx.google.com, not merely start
+    with it (mx.google.com.evil.example is someone else's server).
+    """
+    if not headers:
+        return None
+    parts = _strip_comments(headers[0]).split(";")
+    if parts[0].strip().lower().split(" ")[0] != TRUSTED_AUTHSERV_ID:
+        return None
+
+    seen: dict[str, set[str]] = {}
+    for part in parts[1:]:
+        match = _RESULT.match(part)
+        if match:
+            seen.setdefault(match.group(1).lower(), set()).add(match.group(2).lower())
+
+    outcome = {}
+    for mech, values in seen.items():
+        if mech == "dkim" and "pass" in values:
+            outcome[mech] = "pass"  # several signatures are normal; one valid one is enough
+        elif values == {"pass"}:
+            outcome[mech] = "pass"
+        else:  # conflicting or failing results: take the worst, never the best
+            outcome[mech] = "fail" if "fail" in values else sorted(values - {"pass"})[0]
+    return outcome
+
+
+def dmarc_passed(email: EmailPayload) -> bool:
+    """True only if Google's own header says DMARC passed, and nothing else."""
+    results = parse_results(email.authentication_results)
+    return bool(results) and results.get("dmarc") == "pass"
+
+
 def analyze(email: EmailPayload) -> list[Finding]:
-    header = _trusted_header(email.authentication_results)
-    if header is None:
-        # Gmail stamps every message that arrives from outside. No stamp means
-        # the message never came from outside (e.g. sent within the same
-        # account), so there is nothing to authenticate and no added risk.
+    results = parse_results(email.authentication_results)
+    if results is None:
+        # Gmail stamps every message that arrives from outside, so this is
+        # usually mail sent within Gmail. Either way, nothing was verified.
         return [Finding(
             analyzer=NAME,
-            title="Sent within Gmail",
-            detail="This message did not arrive from an outside server, so sender "
-                   "authentication does not apply.",
+            title="Authentication results unavailable",
+            detail="Gmail recorded no SPF/DKIM/DMARC results, so the sender could not be verified. "
+                   "This is normal for messages sent within Gmail.",
             severity=Severity.INFO,
             points=0,
         )]
-
-    results = {mech.lower(): res.lower() for mech, res in _RESULT_RE.findall(header)}
 
     findings = []
     for mech, res in results.items():
@@ -65,10 +98,3 @@ def analyze(email: EmailPayload) -> list[Finding]:
                 points=points,
             ))
     return findings
-
-
-
-def dmarc_passed(email: EmailPayload) -> bool:
-    """True only if Google's own header says DMARC passed for this message."""
-    header = _trusted_header(email.authentication_results)
-    return bool(header) and bool(re.search(r"\bdmarc=pass\b", header, re.IGNORECASE))
