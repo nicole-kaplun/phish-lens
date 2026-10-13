@@ -40,6 +40,7 @@ function onGmailMessageOpen(e) {
 function extractPayload_(message) {
   return {
     from_header: truncate_(message.getFrom(), LIMITS.HEADER_CHARS),
+    reply_to: truncate_(message.getReplyTo() || '', LIMITS.HEADER_CHARS),
     authentication_results: getAuthenticationResults_(message),
     links: extractLinks_(message.getBody() || ''),
     attachments: describeAttachments_(message),
