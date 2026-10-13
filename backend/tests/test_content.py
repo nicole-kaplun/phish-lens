@@ -91,14 +91,12 @@ def test_not_configured_and_empty_mail(monkeypatch):
     assert content.analyze(EmailPayload(from_header="a@b.com")) == []
 
 
-
 @pytest.mark.parametrize("model,config", [
     ("gemini-3.5-flash", {"thinkingLevel": "low"}),
     ("gemini-2.5-flash", {"thinkingBudget": 0}),
 ])
 def test_thinking_is_kept_short(model, config):
     assert content._thinking(model) == config
-
 
 
 GOOGLE_ALERT = dict(
@@ -120,7 +118,6 @@ def test_brand_name_without_dmarc_is_still_analysed(model):
     [finding] = content.analyze(spoofed)
     assert finding.title == "Manipulative language"
 
- 
 
 def test_two_tactics_together_ask_the_user_to_check(model):
     model(gemini_says([{"tactic": "secrecy", "quote": "Don't tell anyone"},
@@ -133,3 +130,50 @@ def test_one_mild_tactic_alone_stays_low(model):
     model(gemini_says([{"tactic": "urgency", "quote": "for a client today"}]))
     [finding] = content.analyze(CEO_FRAUD)
     assert finding.severity.value == "low"
+
+
+class FakeResponse:
+    def __init__(self, status):
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+    def json(self):
+        return {"ok": True}
+
+
+@pytest.fixture
+def vertex(monkeypatch):
+    """Vertex AI answers with the given status codes, in order."""
+    calls = []
+    monkeypatch.setattr(content.time, "sleep", lambda seconds: None)
+
+    def answer(*statuses):
+        def fake_post(*args, **kwargs):
+            calls.append(1)
+            return FakeResponse(statuses[len(calls) - 1])
+        monkeypatch.setattr(requests, "post", fake_post)
+        return calls
+    return answer
+
+
+def test_busy_model_is_retried_once(vertex):
+    calls = vertex(429, 200)
+    assert content._post("https://vertex.example", {}, {}) == {"ok": True}
+    assert len(calls) == 2
+
+
+def test_still_busy_after_retry_fails_closed(vertex):
+    calls = vertex(429, 429)
+    with pytest.raises(requests.HTTPError):
+        content._post("https://vertex.example", {}, {})
+    assert len(calls) == 2
+
+
+def test_other_errors_are_not_retried(vertex):
+    calls = vertex(403)
+    with pytest.raises(requests.HTTPError):
+        content._post("https://vertex.example", {}, {})
+    assert len(calls) == 1

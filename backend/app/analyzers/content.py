@@ -12,6 +12,7 @@ treated as a hostile component:
   An injected "this email is safe" cannot invent evidence, and cannot
   remove any either.
 * It can only add points, capped at 30. It never lowers the score.
+
 Real security alerts from PayPal or Google use exactly the language phishing
 imitates ("unusual sign-in", "act now"). When the sender is a known brand and
 Google confirms it with DMARC, the wording is expected, so it is not scored
@@ -23,13 +24,16 @@ import logging
 import os
 import re
 import secrets
+import time
 from typing import Literal
 
-import google.auth
 from email.utils import parseaddr
+
+import google.auth
 import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from pydantic import BaseModel, Field, ValidationError
+
 from app.analyzers.authentication import dmarc_passed
 from app.analyzers.reply_to import FREE_MAIL
 from app.brands import BRANDS, belongs_to
@@ -38,6 +42,12 @@ from app.models import EmailPayload, Finding, Severity
 NAME = "content"
 MAX_CHARS = 1_500
 TIMEOUT_SECONDS = 15
+# Vertex AI answers "busy" (429/503) when shared capacity is short. Those
+# refusals come back fast, so one retry after a short pause still fits in
+# the 20-second budget. Slow failures are not retried.
+RETRY_STATUSES = {429, 503}
+RETRY_WINDOW_SECONDS = 3
+RETRY_PAUSE_SECONDS = 1
 MAX_POINTS = 30
 VERTEX_URL = ("https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}"
               "/publishers/google/models/{model}:generateContent")
@@ -112,20 +122,30 @@ def _call_gemini(prompt: str) -> dict:
         _credentials.refresh(GoogleAuthRequest())
     project = os.environ.get("GOOGLE_CLOUD_PROJECT") or getattr(_credentials, "quota_project_id", None) \
         or google.auth.default()[1]
-    resp = requests.post(
+    return _post(
         VERTEX_URL.format(project=project, location=location, model=model),
         headers={"Authorization": f"Bearer {_credentials.token}"},
-        json={
+        body={
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0, "maxOutputTokens": 1024,
                                  "responseMimeType": "application/json",
                                  "responseSchema": RESPONSE_SCHEMA,
                                  "thinkingConfig": _thinking(model)},
         },
-        timeout=TIMEOUT_SECONDS,
     )
+
+
+def _post(url: str, headers: dict, body: dict) -> dict:
+    """One request, plus one retry if Vertex AI quickly says it is busy."""
+    start = time.monotonic()
+    resp = requests.post(url, headers=headers, json=body, timeout=TIMEOUT_SECONDS)
+    if resp.status_code in RETRY_STATUSES and time.monotonic() - start < RETRY_WINDOW_SECONDS:
+        log.info("content analysis retry after HTTP %s", resp.status_code)
+        time.sleep(RETRY_PAUSE_SECONDS)
+        resp = requests.post(url, headers=headers, json=body, timeout=TIMEOUT_SECONDS)
     resp.raise_for_status()
     return resp.json()
+
 
 def _verified_brand(email: EmailPayload) -> bool:
     """A known brand's real domain, with DMARC confirmed by Google."""
@@ -134,6 +154,7 @@ def _verified_brand(email: EmailPayload) -> bool:
     if not domain or domain in FREE_MAIL:  # a personal mailbox is never "the brand"
         return False
     return belongs_to(domain, brand_domains) and dmarc_passed(email)
+
 
 def _flatten(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
