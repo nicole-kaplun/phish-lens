@@ -8,7 +8,7 @@ the brand (paypa1.com). Both pass SPF/DKIM/DMARC for the attacker's domain.
 import re
 from email.utils import parseaddr
 
-from app.brands import BRANDS, belongs_to, lookalike_brand, normalize
+from app.brands import BRANDS, belongs_to, brand_label, lookalike_brand, normalize
 from app.models import EmailPayload, Finding, Severity
 
 NAME = "sender"
@@ -60,9 +60,9 @@ def analyze(email: EmailPayload) -> list[Finding]:
     if imitated:
         findings.append(Finding(
             analyzer=NAME,
-            title=f"Sender domain imitates {imitated.title()}",
+            title=f"Sender domain imitates {brand_label(imitated)}",
             detail=f"The message comes from {domain}, which looks like "
-                   f"{imitated.title()} but is not one of its real domains.",
+                   f"{brand_label(imitated)} but is not one of its real domains.",
             severity=Severity.HIGH,
             points=40,
         ))
@@ -72,13 +72,14 @@ def analyze(email: EmailPayload) -> list[Finding]:
 
     skeleton = normalize(display_name)
     for brand, domains in BRANDS.items():
-        pattern = rf"\b{re.escape(normalize(brand))}\b"
+        # Match at the start of a word: catches "PayPalSecurity" but not "Pineapple".
+        pattern = rf"\b{re.escape(normalize(brand))}"
         if re.search(pattern, skeleton) and not belongs_to(domain, domains):
             findings.append(Finding(
                 analyzer=NAME,
-                title=f"Display name impersonates {brand.title()}",
+                title=f"Display name impersonates {brand_label(brand)}",
                 detail=f'The sender calls itself "{_short(display_name)}" but the message '
-                       f"comes from {domain}, which does not belong to {brand.title()}.",
+                       f"comes from {domain}, which does not belong to {brand_label(brand)}.",
                 severity=Severity.MEDIUM,
                 points=25,
             ))

@@ -7,7 +7,7 @@ import ipaddress
 import re
 from urllib.parse import urlsplit
 
-from app.brands import belongs_to, lookalike_brand
+from app.brands import belongs_to, brand_label, lookalike_brand
 from app.models import EmailPayload, Finding, Link, Severity
 
 NAME = "links"
@@ -61,7 +61,7 @@ def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
                          f'shows "{_short(link.text)}" but opens {host}', Severity.HIGH, 35))
     imitated = lookalike_brand(host)
     if imitated:
-        problems.append((f"Link to a domain imitating {imitated.title()}", host, Severity.HIGH, 40))
+        problems.append((f"Link to a domain imitating {brand_label(imitated)}", host, Severity.HIGH, 40))
     if "@" in parts.netloc:
         problems.append(("Link disguises its destination with '@'",
                          f"looks like {_short(parts.netloc.split('@')[0])} but opens {host}", Severity.HIGH, 30))

@@ -19,7 +19,13 @@ BRANDS = {
     "leumi": ["leumi.co.il"],
     "hapoalim": ["bankhapoalim.co.il"],
 }
+# How each brand is written for people. Keys match BRANDS.
+_DISPLAY_NAMES = {"paypal": "PayPal", "docusign": "DocuSign", "dhl": "DHL",
+                  "leumi": "Bank Leumi", "hapoalim": "Bank Hapoalim"}
 
+
+def brand_label(brand: str) -> str:
+    return _DISPLAY_NAMES.get(brand, brand.title())
 # Characters that look like Latin letters. Attackers use them so that a
 # naive search for "paypal" misses "pаypal" (Cyrillic а) or "PayPaI" (capital I).
 _CONFUSABLES = str.maketrans({
