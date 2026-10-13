@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.analyzers import authentication
 from app.models import EmailPayload
 from app.scoring import score
+from app.analyzers import authentication, sender
 
 app = FastAPI(title="PhishLens")
 
@@ -14,5 +15,5 @@ def health():
 
 @app.post("/analyze")
 def analyze(email: EmailPayload):
-    findings = authentication.analyze(email)
+    findings = authentication.analyze(email) + sender.analyze(email)
     return score(findings)

@@ -12,14 +12,17 @@ MALICIOUS_THRESHOLD = 60
 
 def score(findings: list[Finding]) -> dict:
     total = min(100, sum(f.points for f in findings))
+    severities = {f.severity for f in findings}
 
-    if any(f.severity == Severity.CRITICAL for f in findings):
+    if Severity.CRITICAL in severities:
         verdict = "malicious"
         total = max(total, MALICIOUS_THRESHOLD)
     elif total >= MALICIOUS_THRESHOLD:
         verdict = "malicious"
-    elif total >= SUSPICIOUS_THRESHOLD:
+    elif total >= SUSPICIOUS_THRESHOLD or severities & {Severity.MEDIUM, Severity.HIGH}:
+        # A single medium-or-higher finding is enough to ask the user to check.
         verdict = "suspicious"
+        total = max(total, SUSPICIOUS_THRESHOLD)
     else:
         verdict = "safe"
 
