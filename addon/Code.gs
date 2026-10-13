@@ -25,6 +25,10 @@ var LIMITS = {
   HASH_MAX_BYTES: 10 * 1024 * 1024,
 };
 
+// A result is reused for 10 minutes, so reopening a message is instant and
+// does not spend VirusTotal or Gemini quota again.
+var CACHE_SECONDS = 600;
+
 var VERDICTS = {
   safe:       { label: 'Low risk',   color: '#188038', advice: 'No warning signs found in any check.' },
   suspicious: { label: 'Suspicious', color: '#E37400', advice: 'Check before you click links or open attachments.' },
@@ -35,13 +39,36 @@ var VERDICTS = {
 function onGmailMessageOpen(e) {
   try {
     GmailApp.setCurrentMessageAccessToken(e.gmail.accessToken);
-    var message = GmailApp.getMessageById(e.gmail.messageId);
-    var result = callBackend_(extractPayload_(message));
-    return buildResultCard_(result);
+    return buildResultCard_(analyzeWithCache_(e.gmail.messageId));
   } catch (err) {
     console.error(err);
     return buildErrorCard_();
   }
+}
+
+/**
+ * Per-user cache (other users cannot read it), keyed by message ID.
+ * Results where an outside check failed are not cached, so the next open
+ * retries instead of repeating an incomplete answer for 10 minutes.
+ */
+function analyzeWithCache_(messageId) {
+  var cache = CacheService.getUserCache();
+  var key = 'analysis:v1:' + messageId;
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+
+  var result = callBackend_(extractPayload_(GmailApp.getMessageById(messageId)));
+  var transientFailure = (result.findings || []).some(function (f) {
+    return f.points === 0 && /(check|analysis) unavailable/i.test(f.title);
+  });
+  if (!transientFailure) {
+    try {
+      cache.put(key, JSON.stringify(result), CACHE_SECONDS);
+    } catch (err) {
+      console.warn('result not cached: ' + err);  // e.g. larger than the 100 KB cache limit
+    }
+  }
+  return result;
 }
 
 // ------------------------------------------------------------ extraction
