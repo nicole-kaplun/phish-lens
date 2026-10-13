@@ -8,6 +8,7 @@
 
 var LIMITS = {
   HEADER_CHARS: 4000,
+  BODY_CHARS: 1500,
   LINKS: 100,
   HREF_CHARS: 2048,
   LINK_TEXT_CHARS: 500,
@@ -36,11 +37,13 @@ function onGmailMessageOpen(e) {
 
 // ------------------------------------------------------------ extraction
 
-/** Only the fields the backend's checks use. Subject and body are not sent. */
+/** Only what the checks need. The body is cut to its first 1,500 characters. */
 function extractPayload_(message) {
   return {
     from_header: truncate_(message.getFrom(), LIMITS.HEADER_CHARS),
     reply_to: truncate_(message.getReplyTo() || '', LIMITS.HEADER_CHARS),
+    subject: truncate_(message.getSubject() || '', 300),
+    body_text: truncate_(message.getPlainBody() || '', LIMITS.BODY_CHARS),
     authentication_results: getAuthenticationResults_(message),
     links: extractLinks_(message.getBody() || ''),
     attachments: describeAttachments_(message),
@@ -131,7 +134,7 @@ function buildResultCard_(result) {
   var reasons = CardService.newCardSection().setHeader('Why');
   if (findings.length === 0) {
     reasons.addWidget(CardService.newTextParagraph()
-      .setText('Checked sender authentication, sender identity, links and attachments.'));
+      .setText('Checked sender authentication, sender identity, reply address, links, attachments and wording.'));
   }
   findings.forEach(function (f) {
     reasons.addWidget(CardService.newDecoratedText()
@@ -186,6 +189,16 @@ function buildLinkXraySection_(xray) {
   }
   return section;
 }
+
+/** Shown when the analysis could not run. Never claims the message is safe. */
+function buildErrorCard_() {
+  return CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle('PhishLens'))
+    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph()
+      .setText('Could not analyze this message right now. Treat it with your usual caution.')))
+    .build();
+}
+
 // --------------------------------------------------------------- helpers
 
 /** Card text allows a little HTML, so anything derived from the email is escaped. */
