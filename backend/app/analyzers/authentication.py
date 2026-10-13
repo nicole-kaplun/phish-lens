@@ -74,20 +74,9 @@ def dmarc_passed(email: EmailPayload) -> bool:
 
 def analyze(email: EmailPayload) -> list[Finding]:
     results = parse_results(email.authentication_results)
-    if results is None:
-        # Gmail stamps every message that arrives from outside, so this is
-        # usually mail sent within Gmail. Either way, nothing was verified.
-        return [Finding(
-            analyzer=NAME,
-            title="Authentication results unavailable",
-            detail="Gmail recorded no SPF/DKIM/DMARC results, so the sender could not be verified. "
-                   "This is normal for messages sent within Gmail.",
-            severity=Severity.INFO,
-            points=0,
-        )]
 
     findings = []
-    for mech, res in results.items():
+    for mech, res in (results or {}).items():
         if (mech, res) in _PENALTIES:
             points, severity, detail = _PENALTIES[(mech, res)]
             findings.append(Finding(
@@ -97,4 +86,21 @@ def analyze(email: EmailPayload) -> list[Finding]:
                 severity=severity,
                 points=points,
             ))
+
+    # "Nothing failed" is not the same as "something passed". If no check
+    # passed and none failed (no header from Google, "mx.google.com; none",
+    # or only "none" results), the sender was never verified, so say so.
+    if not findings and "pass" not in (results or {}).values():
+        if results is None:
+            detail = ("Gmail recorded no SPF/DKIM/DMARC results, so the sender could not be verified. "
+                      "This is normal for messages sent within Gmail.")
+        else:
+            detail = "Gmail checked this message but no SPF, DKIM or DMARC check passed, so the sender is not verified."
+        findings.append(Finding(
+            analyzer=NAME,
+            title="Authentication results unavailable",
+            detail=detail,
+            severity=Severity.INFO,
+            points=0,
+        ))
     return findings

@@ -58,7 +58,6 @@ def test_missing_authentication_is_reported_honestly():
     assert finding.title == "Authentication results unavailable" and finding.points == 0
 
 
-
 def test_a_crashing_check_does_not_hide_the_others(client, monkeypatch):
     def broken(email):
         raise RuntimeError("bug")
@@ -67,3 +66,30 @@ def test_a_crashing_check_does_not_hide_the_others(client, monkeypatch):
     titles = [f["title"] for f in result["findings"]]
     assert result["verdict"] == "malicious"                 # the other checks still ran
     assert "Attachments check unavailable" in titles        # and the gap is reported
+
+
+@pytest.mark.parametrize("header", [
+    "mx.google.com; none",                               # Google checked, recorded nothing
+    "mx.google.com; spf=none; dkim=none; dmarc=none",    # domain publishes nothing
+])
+def test_no_result_is_not_the_same_as_a_pass(header):
+    [finding] = authentication.analyze(EmailPayload(from_header="a@b.com", authentication_results=[header]))
+    assert finding.title == "Authentication results unavailable" and finding.points == 0
+
+
+def test_a_real_pass_gets_no_note():
+    mail = EmailPayload(from_header="a@b.com", authentication_results=["mx.google.com; spf=pass; dmarc=pass"])
+    assert authentication.analyze(mail) == []
+
+
+def test_a_slow_check_cannot_hold_the_whole_result(client, monkeypatch):
+    import time
+    from app import main
+    monkeypatch.setattr(main, "DEADLINE_SECONDS", 0.5)
+    monkeypatch.setattr(content, "analyze", lambda mail: time.sleep(3) or [])
+
+    start = time.monotonic()
+    result = client.post("/analyze", json=email()).json()
+
+    assert time.monotonic() - start < 2
+    assert "Content check unavailable" in [f["title"] for f in result["findings"]]
