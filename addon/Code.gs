@@ -144,6 +144,9 @@ function buildResultCard_(result) {
     .addSection(summary)
     .addSection(reasons);
 
+  var xray = buildLinkXraySection_(result.link_xray);
+  if (xray) card.addSection(xray);
+
   // Checks that could not run, or did not apply, are shown rather than hidden,
   // so "Safe" never silently means "not checked".
   if (notes.length > 0) {
@@ -156,6 +159,31 @@ function buildResultCard_(result) {
   }
 
   return card.build();
+}
+
+/** Link X-Ray: what each link says next to where it really goes. */
+function buildLinkXraySection_(xray) {
+  if (!xray || !xray.rows || xray.rows.length === 0) return null;
+
+  var section = CardService.newCardSection()
+    .setHeader('Link X-Ray: where links really go')
+    .setCollapsible(xray.rows.length > 3)
+    .setNumUncollapsibleWidgets(3);
+
+  xray.rows.forEach(function (row) {
+    var mark = row.flagged ? '<font color="#D93025">\u26A0 </font>' : '<font color="#188038">\u2713 </font>';
+    section.addWidget(CardService.newDecoratedText()
+      .setTopLabel('Shows: ' + escape_(row.shown))
+      .setText(mark + 'Opens <b>' + escape_(row.opens) + '</b>')
+      .setWrapText(true));
+  });
+
+  var hidden = Number(xray.total) - xray.rows.length;
+  if (hidden > 0) {
+    section.addWidget(CardService.newTextParagraph()
+      .setText('<font color="#5F6368">+ ' + hidden + ' more links</font>'));
+  }
+  return section;
 }
 // --------------------------------------------------------------- helpers
 
