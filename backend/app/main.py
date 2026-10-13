@@ -1,12 +1,14 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import Depends, FastAPI
 
-from app.analyzers import attachments, authentication, links, sender
-from app.auth import DEV_MODE, require_user
-from app.models import EmailPayload
-from app.scoring import score
 from app.analyzers import (
     attachments, authentication, content, domain_age, links, reply_to, reputation, sender,
 )
+from app.auth import DEV_MODE, require_user
+from app.models import EmailPayload
+from app.scoring import score
+
 # The interactive docs describe the API to anyone who finds the URL,
 # so they exist only in local development.
 app = FastAPI(
@@ -16,6 +18,9 @@ app = FastAPI(
     openapi_url="/openapi.json" if DEV_MODE else None,
 )
 
+# Each analyzer takes the email and returns a list of findings.
+ANALYZERS = [authentication, sender, reply_to, links, attachments, reputation, domain_age, content]
+
 
 @app.get("/health")
 def health():
@@ -24,16 +29,13 @@ def health():
 
 @app.post("/analyze")
 def analyze(email: EmailPayload, user: str = Depends(require_user)):
-    findings = (
-        authentication.analyze(email)
-        + sender.analyze(email)
-        + links.analyze(email)
-        + attachments.analyze(email)
-        + reputation.analyze(email)
-        + domain_age.analyze(email)
-        + reply_to.analyze(email)
-        + content.analyze(email)
-    )
+    # Three analyzers wait on outside services (VirusTotal, RDAP, Gemini).
+    # Running all of them at once makes the card as slow as the slowest
+    # check instead of the sum of all of them.
+    with ThreadPoolExecutor(max_workers=len(ANALYZERS)) as pool:
+        results = list(pool.map(lambda analyzer: analyzer.analyze(email), ANALYZERS))
+    findings = [finding for result in results for finding in result]
+
     result = score(findings)
     result["link_xray"] = links.xray(email)
     return result

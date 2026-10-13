@@ -40,6 +40,7 @@ def lookups(monkeypatch):
                 raise answer
             return answer
         monkeypatch.setattr(domain_age.requests, "get", fake_get)
+        monkeypatch.setattr(domain_age, "_rdap_base", lambda tld: "https://rdap.test/")
         return asked
     return install
 
@@ -105,3 +106,25 @@ def test_results_are_cached(lookups):
     domain_age.analyze(mail())
     domain_age.analyze(mail())
     assert asked == ["fresh-invoices.com"]
+
+
+
+def test_bootstrap_finds_the_registry_and_skips_tlds_without_rdap(monkeypatch):
+    bootstrap = {"services": [[["com", "net"], ["http://old.example/", "https://rdap.verisign.test/"]]]}
+    asked = []
+
+    def fake_get(url, timeout, headers=None):
+        asked.append(url)
+        if url == domain_age.BOOTSTRAP_URL:
+            return FakeResponse(200, bootstrap)
+        return FakeResponse(200, rdap(3000))
+    monkeypatch.setattr(domain_age.requests, "get", fake_get)
+
+    domain_age.analyze(mail(sender="a@fresh-invoices.com", links=["https://site.il/x"]))
+    assert asked == [domain_age.BOOTSTRAP_URL, "https://rdap.verisign.test/domain/fresh-invoices.com"]
+
+
+def test_big_mail_providers_are_not_looked_up(lookups):
+    asked = lookups({})
+    domain_age.analyze(mail(sender="Dana <dana@gmail.com>"))
+    assert asked == []

@@ -2,7 +2,9 @@
 
 Phishing domains are usually registered days before an attack and abandoned
 soon after, so a very young domain is one of the strongest signals there is.
-RDAP is the public, standard successor to WHOIS and needs no API key.
+RDAP is the public, standard successor to WHOIS and needs no API key. The
+server for each top-level domain comes from IANA's official bootstrap file,
+so lookups go straight to the registry, with no third-party redirector.
 
 The RDAP response is external input: only one date is read from it, and it
 must parse and be plausible. Lookups that fail add a note, never points.
@@ -16,11 +18,12 @@ from urllib.parse import urlsplit
 
 import requests
 
+from app.analyzers.reply_to import FREE_MAIL
 from app.brands import BRANDS, belongs_to
 from app.models import EmailPayload, Finding, Severity
 
 NAME = "domain_age"
-RDAP_URL = "https://rdap.org/domain/{}"
+BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json"
 TIMEOUT_SECONDS = 3
 MAX_LOOKUPS = 3
 CACHE_SECONDS = 24 * 3600
@@ -28,9 +31,11 @@ CACHE_SECONDS = 24 * 3600
 # Suffixes where the registrable domain has three labels (example.co.il).
 _TWO_LEVEL_SUFFIXES = {"co.il", "org.il", "ac.il", "gov.il", "net.il", "muni.il",
                        "co.uk", "org.uk", "ac.uk", "com.au", "net.au", "co.jp", "com.br", "co.in", "co.za"}
-_KNOWN_GOOD = [d for domains in BRANDS.values() for d in domains]
+# Brands we know, and big mail providers: decades old, no point asking.
+_KNOWN_GOOD = [d for domains in BRANDS.values() for d in domains] + sorted(FREE_MAIL)
 
 _cache: dict[str, tuple[float, datetime | None]] = {}
+_bootstrap: dict[str, str] | None = None
 log = logging.getLogger(__name__)
 
 
@@ -77,12 +82,32 @@ def _parse_registration(body: object) -> datetime | None:
     return None
 
 
+def _rdap_base(tld: str) -> str | None:
+    """The registry's RDAP server for a top-level domain, from IANA (loaded once)."""
+    global _bootstrap
+    if _bootstrap is None:
+        resp = requests.get(BOOTSTRAP_URL, timeout=TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        table = {}
+        for tlds, urls in resp.json()["services"]:
+            https = [u for u in urls if u.startswith("https://")]
+            for t in tlds:
+                if https:
+                    table[t.lower()] = https[0]
+        _bootstrap = table
+    return _bootstrap.get(tld)
+
+
 def _registration_date(domain: str) -> datetime | None:
     """Raises on failure. Returns None when the registry has no RDAP data."""
     cached = _cache.get(domain)
     if cached and time.time() - cached[0] < CACHE_SECONDS:
         return cached[1]
-    resp = requests.get(RDAP_URL.format(domain), timeout=TIMEOUT_SECONDS,
+    base = _rdap_base(domain.rsplit(".", 1)[-1])
+    if base is None:
+        _cache[domain] = (time.time(), None)  # this registry does not publish RDAP
+        return None
+    resp = requests.get(f"{base.rstrip('/')}/domain/{domain}", timeout=TIMEOUT_SECONDS,
                         headers={"Accept": "application/rdap+json"})
     if resp.status_code == 404:
         when = None  # registry does not publish RDAP (common for some country codes)
@@ -100,7 +125,8 @@ def analyze(email: EmailPayload) -> list[Finding]:
         try:
             registered = _registration_date(domain)
         except (requests.RequestException, ValueError, KeyError, AttributeError, TypeError) as exc:
-            log.warning("rdap lookup failed: %s", type(exc).__name__)
+            status = getattr(getattr(exc, "response", None), "status_code", "")
+            log.warning("rdap lookup failed: %s %s", type(exc).__name__, status)
             failed.append(domain)
             continue
         if registered is None:

@@ -30,7 +30,7 @@ from app.models import EmailPayload, Finding, Severity
 
 NAME = "content"
 MAX_CHARS = 1_500
-TIMEOUT_SECONDS = 8
+TIMEOUT_SECONDS = 15
 MAX_POINTS = 30
 VERTEX_URL = ("https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}"
               "/publishers/google/models/{model}:generateContent")
@@ -81,6 +81,15 @@ def _prompt(subject: str, body: str, tag: str) -> str:
     )
 
 
+def _thinking(model: str) -> dict:
+    """Short tasks do not need deep reasoning; it roughly halves the latency.
+
+    Measured from Cloud Shell: gemini-3.5-flash 10.5 s by default, 6.3 s with
+    thinkingLevel=low; gemini-2.5-flash 5.5 s with thinking off.
+    """
+    return {"thinkingBudget": 0} if model.startswith("gemini-2") else {"thinkingLevel": "low"}
+
+
 def _call_gemini(prompt: str) -> dict:
     """POST to Vertex AI as the service's own identity. Raises on any failure."""
     global _credentials
@@ -97,9 +106,10 @@ def _call_gemini(prompt: str) -> dict:
         headers={"Authorization": f"Bearer {_credentials.token}"},
         json={
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0, "maxOutputTokens": 512,
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 1024,
                                  "responseMimeType": "application/json",
-                                 "responseSchema": RESPONSE_SCHEMA},
+                                 "responseSchema": RESPONSE_SCHEMA,
+                                 "thinkingConfig": _thinking(model)},
         },
         timeout=TIMEOUT_SECONDS,
     )
@@ -130,7 +140,8 @@ def analyze(email: EmailPayload) -> list[Finding]:
         verdict = Verdict.model_validate_json(text)
     except (requests.RequestException, google.auth.exceptions.GoogleAuthError,
             KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
-        log.warning("content analysis failed: %s", type(exc).__name__)
+        status = getattr(getattr(exc, "response", None), "status_code", "")
+        log.warning("content analysis failed: %s %s", type(exc).__name__, status)
         return [_unavailable("The language model could not be reached or gave an invalid answer.")]
 
     # Keep only evidence that is really in the email, one quote per tactic.

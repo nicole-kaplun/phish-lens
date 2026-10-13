@@ -89,3 +89,12 @@ def test_not_configured_and_empty_mail(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     assert content.analyze(CEO_FRAUD)[0].title == "Content analysis unavailable"
     assert content.analyze(EmailPayload(from_header="a@b.com")) == []
+
+
+
+@pytest.mark.parametrize("model,config", [
+    ("gemini-3.5-flash", {"thinkingLevel": "low"}),
+    ("gemini-2.5-flash", {"thinkingBudget": 0}),
+])
+def test_thinking_is_kept_short(model, config):
+    assert content._thinking(model) == config
