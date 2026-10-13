@@ -10,6 +10,15 @@ class Link(BaseModel):
     text: str = Field(default="", max_length=500)
 
 
+class Attachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(max_length=255)
+    content_type: str = Field(default="", max_length=255)
+    size: int = Field(default=0, ge=0)
+    sha256: str = Field(default="", pattern=r"^([a-f0-9]{64})?$")
+
+
 class EmailPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -18,6 +27,7 @@ class EmailPayload(BaseModel):
     body_text: str = Field(default="", max_length=50_000)
     authentication_results: list[str] = Field(default_factory=list, max_length=10)
     links: list[Link] = Field(default_factory=list, max_length=100)
+    attachments: list[Attachment] = Field(default_factory=list, max_length=20)
 
 
 class Severity(str, Enum):
