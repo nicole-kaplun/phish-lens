@@ -12,7 +12,6 @@ class Link(BaseModel):
 
 class Attachment(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     filename: str = Field(max_length=255)
     content_type: str = Field(default="", max_length=255)
     size: int = Field(default=0, ge=0)
@@ -23,6 +22,7 @@ class EmailPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     from_header: str = Field(max_length=4_000)
+    reply_to: str = Field(default="", max_length=4_000)
     subject: str = Field(default="", max_length=4_000)
     body_text: str = Field(default="", max_length=50_000)
     authentication_results: list[str] = Field(default_factory=list, max_length=10)

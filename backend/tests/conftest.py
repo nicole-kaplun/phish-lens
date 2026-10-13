@@ -13,6 +13,19 @@ from app.main import app
 GOOGLE_PASS = "mx.google.com; dkim=pass; spf=pass; dmarc=pass"
 
 
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Tests never reach the internet. Any lookup that tries fails as 'unavailable'."""
+    import requests
+
+    from app.analyzers import domain_age
+
+    def offline(*args, **kwargs):
+        raise requests.ConnectionError("network disabled in tests")
+    monkeypatch.setattr(requests, "get", offline)
+    domain_age._cache.clear()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

@@ -4,7 +4,7 @@ from app.analyzers import attachments, authentication, links, sender
 from app.auth import DEV_MODE, require_user
 from app.models import EmailPayload
 from app.scoring import score
-from app.analyzers import attachments, authentication, links, reputation, sender
+from app.analyzers import attachments, authentication, domain_age, links, reply_to, reputation, sender
 
 # The interactive docs describe the API to anyone who finds the URL,
 # so they exist only in local development.
@@ -29,6 +29,8 @@ def analyze(email: EmailPayload, user: str = Depends(require_user)):
         + links.analyze(email)
         + attachments.analyze(email)
         + reputation.analyze(email)
+        + domain_age.analyze(email)
+        + reply_to.analyze(email)
     )
     result = score(findings)
     result["link_xray"] = links.xray(email)
