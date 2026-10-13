@@ -65,3 +65,10 @@ def analyze(email: EmailPayload) -> list[Finding]:
                 points=points,
             ))
     return findings
+
+
+
+def dmarc_passed(email: EmailPayload) -> bool:
+    """True only if Google's own header says DMARC passed for this message."""
+    header = _trusted_header(email.authentication_results)
+    return bool(header) and bool(re.search(r"\bdmarc=pass\b", header, re.IGNORECASE))

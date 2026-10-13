@@ -12,6 +12,10 @@ treated as a hostile component:
   An injected "this email is safe" cannot invent evidence, and cannot
   remove any either.
 * It can only add points, capped at 30. It never lowers the score.
+Real security alerts from PayPal or Google use exactly the language phishing
+imitates ("unusual sign-in", "act now"). When the sender is a known brand and
+Google confirms it with DMARC, the wording is expected, so it is not scored
+and the text is not sent to the model at all.
 
 Authentication uses the Cloud Run service identity: there is no API key.
 """
@@ -22,10 +26,12 @@ import secrets
 from typing import Literal
 
 import google.auth
+from email.utils import parseaddr
 import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from pydantic import BaseModel, Field, ValidationError
-
+from app.analyzers.authentication import dmarc_passed
+from app.brands import BRANDS, belongs_to
 from app.models import EmailPayload, Finding, Severity
 
 NAME = "content"
@@ -116,6 +122,11 @@ def _call_gemini(prompt: str) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def _verified_brand(email: EmailPayload) -> bool:
+    """A known brand's real domain, with DMARC confirmed by Google."""
+    domain = parseaddr(email.from_header)[1].rpartition("@")[2].lower()
+    brand_domains = [d for domains in BRANDS.values() for d in domains]
+    return bool(domain) and belongs_to(domain, brand_domains) and dmarc_passed(email)
 
 def _flatten(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
@@ -130,6 +141,8 @@ def analyze(email: EmailPayload) -> list[Finding]:
     subject = email.subject[:300]
     body = email.body_text[:MAX_CHARS]
     if not (subject.strip() or body.strip()):
+        return []
+    if _verified_brand(email):
         return []
     if not os.environ.get("GEMINI_MODEL"):
         return [_unavailable("Content analysis is not configured on this server.")]

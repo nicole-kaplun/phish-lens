@@ -98,3 +98,24 @@ def test_not_configured_and_empty_mail(monkeypatch):
 ])
 def test_thinking_is_kept_short(model, config):
     assert content._thinking(model) == config
+
+
+
+GOOGLE_ALERT = dict(
+    from_header="Google <no-reply@accounts.google.com>",
+    subject="Security alert",
+    body_text="If you did not grant access, someone else may be using your account. Check activity now.",
+)
+
+
+def test_verified_brand_alerts_are_not_scored_or_sent(model):
+    sent = model(gemini_says([{"tactic": "urgency", "quote": "Check activity now"}]))
+    real = EmailPayload(**GOOGLE_ALERT, authentication_results=["mx.google.com; dmarc=pass"])
+    assert content.analyze(real) == [] and sent == []
+
+
+def test_brand_name_without_dmarc_is_still_analysed(model):
+    model(gemini_says([{"tactic": "urgency", "quote": "Check activity now"}]))
+    spoofed = EmailPayload(**GOOGLE_ALERT, authentication_results=["mx.google.com; dmarc=fail"])
+    [finding] = content.analyze(spoofed)
+    assert finding.title == "Manipulative language"
