@@ -116,6 +116,9 @@ function callBackend_(payload) {
 
 function buildResultCard_(result) {
   var verdict = VERDICTS[result.verdict] || VERDICTS.suspicious;
+  var all = result.findings || [];
+  var findings = all.filter(function (f) { return f.points > 0; });
+  var notes = all.filter(function (f) { return f.points === 0; });
 
   var summary = CardService.newCardSection()
     .addWidget(CardService.newDecoratedText()
@@ -125,7 +128,6 @@ function buildResultCard_(result) {
     .addWidget(CardService.newTextParagraph().setText(verdict.advice));
 
   var reasons = CardService.newCardSection().setHeader('Why');
-  var findings = (result.findings || []).filter(function (f) { return f.points > 0; });
   if (findings.length === 0) {
     reasons.addWidget(CardService.newTextParagraph()
       .setText('Checked sender authentication, sender identity, links and attachments.'));
@@ -137,22 +139,24 @@ function buildResultCard_(result) {
       .setWrapText(true));
   });
 
-  return CardService.newCardBuilder()
+  var card = CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('PhishLens'))
     .addSection(summary)
-    .addSection(reasons)
-    .build();
-}
+    .addSection(reasons);
 
-/** Shown when the analysis could not run. Never claims the message is safe. */
-function buildErrorCard_() {
-  return CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader().setTitle('PhishLens'))
-    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph()
-      .setText('Could not analyze this message right now. Treat it with your usual caution.')))
-    .build();
-}
+  // Checks that could not run, or did not apply, are shown rather than hidden,
+  // so "Safe" never silently means "not checked".
+  if (notes.length > 0) {
+    var notesSection = CardService.newCardSection().setHeader('Notes');
+    notes.forEach(function (f) {
+      notesSection.addWidget(CardService.newTextParagraph()
+        .setText('<font color="#5F6368">' + escape_(f.title) + ': ' + escape_(f.detail) + '</font>'));
+    });
+    card.addSection(notesSection);
+  }
 
+  return card.build();
+}
 // --------------------------------------------------------------- helpers
 
 /** Card text allows a little HTML, so anything derived from the email is escaped. */
