@@ -4,6 +4,7 @@ import os
 # call VirusTotal for real. Set before the app is imported.
 os.environ["PHISHLENS_DEV"] = "1"
 os.environ.pop("VT_API_KEY", None)
+os.environ.pop("GEMINI_MODEL", None)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +24,7 @@ def no_network(monkeypatch):
     def offline(*args, **kwargs):
         raise requests.ConnectionError("network disabled in tests")
     monkeypatch.setattr(requests, "get", offline)
+    monkeypatch.setattr(requests, "post", offline)
     domain_age._cache.clear()
 
 
