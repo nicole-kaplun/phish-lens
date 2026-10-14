@@ -32,8 +32,8 @@ def test_other_organisation_is_only_a_weak_signal(client):
     assert (verdict, titles) == ("safe", ["Replies go to a different domain"])
 
 
-SHARED_FILE = dict(from_header="WeTransfer <noreply@wetransfer.com>", reply_to="fotodc59@gmail.com",
-                   subject="fotodc59@gmail.com sent you 00000003 via WeTransfer")
+SHARED_FILE = dict(from_header="WeTransfer <noreply@wetransfer.com>", reply_to="sharer.name@gmail.com",
+                   subject="sharer.name@gmail.com sent you 00000003 via WeTransfer")
 
 
 def test_sharing_service_naming_the_person_is_only_a_weak_signal(client):
