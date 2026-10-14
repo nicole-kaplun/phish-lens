@@ -1,3 +1,8 @@
+"""The PhishLens API: one endpoint that turns an email into a verdict.
+
+POST /analyze -> verify the caller (auth.py) -> validate the input (models.py)
+-> run every analyzer in parallel -> combine the findings (scoring.py).
+"""
 import logging
 from concurrent.futures import ThreadPoolExecutor, wait
 

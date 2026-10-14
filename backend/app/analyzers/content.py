@@ -157,6 +157,7 @@ def _verified_brand(email: EmailPayload) -> bool:
 
 
 def _flatten(text: str) -> str:
+    """Lower-case, single spaces: so a quote matches the email despite line breaks."""
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
@@ -166,16 +167,18 @@ def _unavailable(reason: str) -> Finding:
 
 
 def analyze(email: EmailPayload) -> list[Finding]:
+    """Ask Gemini which manipulation tactics the text uses, then trust only verified quotes."""
     subject = email.subject[:300]
     body = email.body_text[:MAX_CHARS]
     if not (subject.strip() or body.strip()):
         return []
     if _verified_brand(email):
-        return []
+        return []  # real alerts from known brands sound urgent by design
     if not os.environ.get("GEMINI_MODEL"):
         return [_unavailable("Content analysis is not configured on this server.")]
 
     try:
+        # A new random tag per request: the sender cannot guess it to "close" the data block.
         raw = _call_gemini(_prompt(subject, body, f"email-{secrets.token_hex(8)}"))
         text = raw["candidates"][0]["content"]["parts"][0]["text"]
         verdict = Verdict.model_validate_json(text)

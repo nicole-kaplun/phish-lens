@@ -1,3 +1,4 @@
+"""Shared test setup: no network, dev mode, and a helper that builds a clean email."""
 import os
 
 # Tests run the API in local-dev mode (no Google token needed) and never

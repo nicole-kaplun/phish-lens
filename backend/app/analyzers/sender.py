@@ -40,6 +40,7 @@ def _short(text: str, limit: int = 80) -> str:
 
 
 def analyze(email: EmailPayload) -> list[Finding]:
+    """Compare what the user sees (the display name) with the real sending domain."""
     display_name, address, malformed = _split_from(email.from_header)
     domain = _domain_of(address)
 
@@ -85,6 +86,7 @@ def analyze(email: EmailPayload) -> list[Finding]:
             ))
             break
 
+    # "service@paypal.com <x@evil.com>": the name itself pretends to be an address.
     fake = _EMAIL_IN_NAME.search(display_name)
     if fake and fake.group(1).lower() != domain:
         findings.append(Finding(

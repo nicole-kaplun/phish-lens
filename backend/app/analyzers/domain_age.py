@@ -56,6 +56,7 @@ def registered_domain(host: str) -> str | None:
 
 
 def _candidate_domains(email: EmailPayload) -> list[str]:
+    """The sender's domain and the link domains, without duplicates or well-known ones."""
     hosts = [parseaddr(email.from_header)[1].rpartition("@")[2]]
     for link in email.links:
         try:
@@ -71,6 +72,7 @@ def _candidate_domains(email: EmailPayload) -> list[str]:
 
 
 def _parse_registration(body: object) -> datetime | None:
+    """The registration date from an RDAP reply. Raises if the date is implausible."""
     for event in body.get("events", []):  # type: ignore[union-attr]
         if event.get("eventAction") == "registration":
             when = datetime.fromisoformat(str(event["eventDate"]).replace("Z", "+00:00"))
@@ -119,6 +121,7 @@ def _registration_date(domain: str) -> datetime | None:
 
 
 def analyze(email: EmailPayload) -> list[Finding]:
+    """Flag sender or link domains registered in the last 7 or 30 days."""
     findings = []
     failed = []
     for domain in _candidate_domains(email):

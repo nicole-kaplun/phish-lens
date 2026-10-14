@@ -1,3 +1,4 @@
+"""Look-alike detection: real domains pass, imitations are caught."""
 import pytest
 
 from app.brands import lookalike_brand, normalize

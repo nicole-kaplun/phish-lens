@@ -49,22 +49,27 @@ def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
         return [("Malformed link", _short(link.href), Severity.LOW, 10)]
 
     scheme = parts.scheme.lower()
+    # javascript:, data: and file: links can run code or open local files.
     if scheme and scheme not in SAFE_SCHEMES:
         return [(f"Link uses unusual '{scheme}:' scheme", _short(link.href), Severity.MEDIUM, 25)]
     if scheme in ("mailto", "tel") or not host:
         return []
 
     problems = []
+    # The text names one site and the link opens another: the classic phishing link.
     shown = _DOMAIN_IN_TEXT.search(link.text)
     if shown and not _same_site(shown.group(1).lower(), host):
         problems.append(("Link text hides its real destination",
                          f'shows "{_short(link.text)}" but opens {host}', Severity.HIGH, 35))
+    # paypa1.com, paypal-secure.net, a Cyrillic "а" (see brands.py).
     imitated = lookalike_brand(host)
     if imitated:
         problems.append((f"Link to a domain imitating {brand_label(imitated)}", host, Severity.HIGH, 40))
+    # In https://paypal.com@evil.com everything before "@" is a user name: the browser opens evil.com.
     if "@" in parts.netloc:
         problems.append(("Link disguises its destination with '@'",
                          f"looks like {_short(parts.netloc.split('@')[0])} but opens {host}", Severity.HIGH, 30))
+    # Real companies link to their domain names, not to raw server addresses.
     if _is_ip(host):
         problems.append(("Link points to a raw IP address", host, Severity.MEDIUM, 20))
     if host in SHORTENERS:
@@ -73,6 +78,7 @@ def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
 
 
 def analyze(email: EmailPayload) -> list[Finding]:
+    """Check every link; report each kind of problem once, with a count."""
     grouped: dict[str, tuple[str, Severity, int, int]] = {}
     for link in email.links:
         for title, example, severity, points in _check_link(link):

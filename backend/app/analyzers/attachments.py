@@ -28,6 +28,7 @@ def _extensions(filename: str) -> list[str]:
 
 
 def _worst_problem(att: Attachment) -> tuple[str, str, Severity, int] | None:
+    """The most serious problem with one file, or None. Checked from worst to mildest."""
     name = att.filename
     exts = _extensions(name)
     last = exts[-1] if exts else ""
@@ -55,6 +56,7 @@ def _worst_problem(att: Attachment) -> tuple[str, str, Severity, int] | None:
         return ("Compressed attachment",
                 f'"{shown}" is an archive, which can hide its contents from scanners.', Severity.LOW, 10)
     return None
+
 
 def analyze(email: EmailPayload) -> list[Finding]:
     # One finding per kind of problem: six ordinary .zip files are one weak

@@ -36,6 +36,7 @@ def _unavailable(reason: str) -> Finding:
 
 
 def analyze(email: EmailPayload) -> list[Finding]:
+    """Look up each attachment's hash. Unknown files add nothing; failures add a note."""
     hashed = [a for a in email.attachments if a.sha256][:MAX_LOOKUPS]
     if not hashed:
         return []
@@ -60,6 +61,7 @@ def analyze(email: EmailPayload) -> list[Finding]:
             continue
 
         name = att.filename[:80]
+        # One or two engines can be a false positive; three or more agreeing is strong evidence.
         if malicious >= 3:
             findings.append(Finding(
                 analyzer=NAME, title="Known malicious attachment",
