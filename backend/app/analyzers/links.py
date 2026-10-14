@@ -5,8 +5,10 @@ fifty identical tracking links does not score fifty times higher than one.
 """
 import ipaddress
 import re
+from email.utils import parseaddr
 from urllib.parse import urlsplit
 
+from app.analyzers.authentication import dmarc_passed
 from app.brands import belongs_to, brand_label, lookalike_brand
 from app.models import EmailPayload, Finding, Link, Severity
 
@@ -40,8 +42,19 @@ def _is_ip(host: str) -> bool:
         return False
 
 
-def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
-    """Returns (title, example, severity, points) for each problem in one link."""
+def _verified_sender_domain(email: EmailPayload) -> str:
+    """The sender's domain, but only when Google confirms it with DMARC; otherwise ""."""
+    address = parseaddr(email.from_header)[1]
+    if "@" not in address or not dmarc_passed(email):
+        return ""
+    return address.rpartition("@")[2].lower()
+
+
+def _check_link(link: Link, verified_sender: str = "") -> list[tuple[str, str, Severity, int]]:
+    """Returns (title, example, severity, points) for each problem in one link.
+
+    verified_sender: the DMARC-verified sender domain, or "" when not verified.
+    """
     try:
         parts = urlsplit(link.href.strip())
         host = (parts.hostname or "").lower()
@@ -58,7 +71,12 @@ def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
     problems = []
     # The text names one site and the link opens another: the classic phishing link.
     shown = _DOMAIN_IN_TEXT.search(link.text)
-    if shown and not _same_site(shown.group(1).lower(), host):
+    # Marketing mail wraps every link in a click-tracking redirect, so the text names the
+    # sender's own site while the link opens the mailing service. When the text names the
+    # verified sender itself, that is tracking, not deception. The redirect host is still
+    # checked below (look-alike, IP, shortener) and by the domain age check.
+    own_site = bool(shown and verified_sender and _same_site(shown.group(1).lower(), verified_sender))
+    if shown and not own_site and not _same_site(shown.group(1).lower(), host):
         problems.append(("Link text hides its real destination",
                          f'shows "{_short(link.text)}" but opens {host}', Severity.HIGH, 35))
     # paypa1.com, paypal-secure.net, a Cyrillic "а" (see brands.py).
@@ -80,8 +98,9 @@ def _check_link(link: Link) -> list[tuple[str, str, Severity, int]]:
 def analyze(email: EmailPayload) -> list[Finding]:
     """Check every link; report each kind of problem once, with a count."""
     grouped: dict[str, tuple[str, Severity, int, int]] = {}
+    verified_sender = _verified_sender_domain(email)
     for link in email.links:
-        for title, example, severity, points in _check_link(link):
+        for title, example, severity, points in _check_link(link, verified_sender):
             if title in grouped:
                 first_example, sev, pts, count = grouped[title]
                 grouped[title] = (first_example, sev, pts, count + 1)
@@ -104,6 +123,7 @@ def xray(email: EmailPayload, limit: int = 10) -> dict:
     between link text and destination for themselves. Flagged links first.
     """
     rows, seen = [], set()
+    verified_sender = _verified_sender_domain(email)
     for link in email.links:
         try:
             parts = urlsplit(link.href.strip())
@@ -121,7 +141,7 @@ def xray(email: EmailPayload, limit: int = 10) -> dict:
         rows.append({
             "shown": _short(shown),
             "opens": host or _short(link.href),
-            "flagged": bool(_check_link(link)),
+            "flagged": bool(_check_link(link, verified_sender)),
         })
     rows.sort(key=lambda r: not r["flagged"])  # stable: flagged first, original order kept
     return {"rows": rows[:limit], "total": len(rows)}

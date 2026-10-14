@@ -93,3 +93,29 @@ def test_a_slow_check_cannot_hold_the_whole_result(client, monkeypatch):
 
     assert time.monotonic() - start < 2
     assert "Content check unavailable" in [f["title"] for f in result["findings"]]
+
+
+TRACKED = {"href": "https://go.flashy.app/c/abc123", "text": "https://www.shop.example"}
+
+
+def test_tracking_link_from_a_verified_sender_is_not_deceptive(client):
+    # A newsletter from shop.example names its own site; the link goes through its mailing service.
+    mail = email(from_header="Shop <news@shop.example>", links=[TRACKED])
+    result = client.post("/analyze", json=mail).json()
+    assert result["verdict"] == "safe"
+    assert result["link_xray"]["rows"][0]["flagged"] is False
+
+
+def test_same_link_without_dmarc_is_still_flagged(client):
+    mail = email(from_header="Shop <news@shop.example>", links=[TRACKED], authentication_results=[])
+    titles = [f["title"] for f in client.post("/analyze", json=mail).json()["findings"]]
+    assert "Link text hides its real destination" in titles
+
+
+def test_verified_sender_showing_another_brand_is_still_flagged(client):
+    # An attacker can pass DMARC for their own domain; showing paypal.com is still deception.
+    mail = email(from_header="Support <help@evil.example>",
+                 links=[{"href": "https://evil.example/login", "text": "paypal.com/login"}])
+    titles = [f["title"] for f in client.post("/analyze", json=mail).json()["findings"]]
+    assert "Link text hides its real destination" in titles
+

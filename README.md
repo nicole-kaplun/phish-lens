@@ -104,8 +104,8 @@ Each check is an independent **analyzer** (`backend/app/analyzers/*.py`): a modu
 |---|---|---|
 | **Authentication** | DMARC / SPF / DKIM failures, read from Gmail's own `Authentication-Results` header; mail where nothing could be verified | Claims to be from `paypal.com` but fails DMARC |
 | **Sender** | Brand in the display name from a foreign domain; an address inside the display name; look-alike sender domains; malformed `From` headers | `PayPal Security <alerts@random-mailer.com>`, `service@paypal.com <x@evil.com>` |
-| **Reply-To** | Replies that go somewhere other than the sender, especially an organisation's mail answered at a free mailbox | From `ceo@company.com`, Reply-To `ceo.company@gmail.com` |
-| **Links** | Link text showing a different site than the real target; look-alike domains; the `user@host` trick; raw IPs; shorteners; non-web schemes | `<a href="https://evil.com">paypal.com/login</a>`, `https://paypal.com@evil.com` |
+| **Reply-To** | Replies that go somewhere other than the sender, especially an organisation's mail answered at a free mailbox (a weak signal when a verified sharing service names that address in the message) | From `ceo@company.com`, Reply-To `ceo.company@gmail.com` |
+| **Links** | Link text showing a different site than the real target (unless it names the DMARC-verified sender's own site, which is how click-tracking in newsletters looks); look-alike domains; the `user@host` trick; raw IPs; shorteners; non-web schemes | `<a href="https://evil.com">paypal.com/login</a>`, `https://paypal.com@evil.com` |
 | **Attachments** | Executables, double extensions, right-to-left override, a name that disagrees with its type, HTML/SVG pages, macro files, archives | `invoice.pdf.exe`, `invoice[U+202E]fdp.exe` (displays as `invoiceexe.pdf`) |
 | **Reputation** | Attachments known to antivirus engines, by SHA-256 on VirusTotal | A file named `invoice.pdf` that 65 of 75 engines flag |
 | **Domain age** | Sender and link domains registered in the last 7 or 30 days, via RDAP (the successor to WHOIS) | A perfectly authenticated message from a two-day-old domain |
@@ -248,9 +248,10 @@ Testing against real Gmail messages, deliberately breaking things, and asking fo
 8. **The same email, two scores.** The Hebrew version of a CEO-fraud email scored 30 once and 18 the next time. LLM output varies, so the score must not hinge on one tactic. I defined each tactic precisely in the prompt and made two tactics together MEDIUM, and in repeated runs of that scenario the verdict stayed Suspicious, even when the model found slightly different evidence.
 9. **An outside review.** I asked for an independent review and verified each point before changing anything. Real issues it found: the authserv-id check used `startswith` (so `mx.google.com.evil.example` passed), a `dmarc=pass` inside a comment could override a fail, `outlook.com` was treated as a Microsoft brand domain (so any free Outlook account counted as "verified Microsoft"), unquoted links, `data-href` attributes and HTML entities were misread, and six `.zip` files made an email *Malicious*. The backend fixes have regression tests (`test_hardening.py`, `test_xray.py`); the add-on's link-extraction fixes were checked by hand, because the add-on has no automated tests.
 10. **The server could do far more than its job.** I checked which roles the running service had: Google's default compute account, with **Editor** on the whole project. Anyone who broke into the service could have changed almost anything. It now runs as a dedicated account that can only call Gemini and read the one VirusTotal secret.
-11. **"Works on my machine".** The first deploy crashed: `google-auth` was installed locally but missing from `requirements.txt`. Cloud Run kept the previous revision serving.
+11. **A false alarm from real mail.** Checking my own inbox, a shop's newsletter came out *Suspicious*: its links showed the shop's site but opened the mailing service's click tracker (`go.flashy.app`). Attackers use redirects too, so I did not allow-list mailing services. Instead, when the link text names the sender's own domain and DMARC confirms the sender, the mismatch is treated as tracking; text naming any other site is still flagged, and the redirect host still goes through the look-alike, IP and domain-age checks. The same check found a real WeTransfer notification marked *Suspicious*: sharing services set Reply-To to the person sharing, often a Gmail address. Business Email Compromise depends on the reader not seeing where replies go, so when a DMARC-verified sender names the Reply-To address in the message itself, it now counts as a weak signal only.
+12. **"Works on my machine".** The first deploy crashed: `google-auth` was installed locally but missing from `requirements.txt`. Cloud Run kept the previous revision serving.
 
-**Test suite:** 110 tests, run on every push by GitHub Actions. They never use the network: VirusTotal, RDAP and Gemini are replaced with fakes, so they test my logic, not the services. The live system (deployment, Gemini, the add-on in Gmail) was tested by hand with real emails: legitimate mail, phishing, CEO fraud without a link, and an outside service failing.
+**Test suite:** 116 tests, run on every push by GitHub Actions. They never use the network: VirusTotal, RDAP and Gemini are replaced with fakes, so they test my logic, not the services. The live system (deployment, Gemini, the add-on in Gmail) was tested by hand with real emails: legitimate mail, phishing, CEO fraud without a link, and an outside service failing.
 
 ---
 
@@ -265,6 +266,7 @@ Testing against real Gmail messages, deliberately breaking things, and asking fo
 - **Domain age** is unavailable where the registry does not publish RDAP (several country codes, including `.il`). The registrable domain uses a short list of two-level suffixes (`co.il`, `co.uk`...) rather than the full Public Suffix List.
 - **HTML is parsed with a regular expression** to extract links. It handles quoted, unquoted and entity-encoded links and ignores look-alike attributes such as `data-href`, but it is not a full HTML parser.
 - **VirusTotal free tier.** Four lookups per minute, and its terms do not allow commercial use. A product would need a paid licence.
+- **Not available in Spam.** Gmail does not run add-ons on messages in the Spam folder. In practice PhishLens covers the mail that Gmail's own filter let through, which is where a second opinion matters most.
 - **The add-on has no automated tests.** Its logic is kept small on purpose (extraction and display); everything that decides the verdict is in the tested backend.
 - **Not production-ready.** Test deployment only (no Marketplace review), allow-listed users, no rate limiting beyond Cloud Run defaults.
 
@@ -418,6 +420,6 @@ phish-lens/
     │       ├── reputation.py     VirusTotal hash lookup
     │       ├── domain_age.py     RDAP registration date
     │       └── content.py        Gemini, with prompt-injection defences
-    └── tests/                    110 tests, no network: scenarios, validation, auth, look-alikes,
+    └── tests/                    116 tests, no network: scenarios, validation, auth, look-alikes,
                                   Link X-Ray, outside services (faked), review regressions
 ```

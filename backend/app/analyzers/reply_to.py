@@ -8,6 +8,7 @@ no links or attachments, so nothing else in PhishLens would notice them.
 """
 from email.utils import parseaddr
 
+from app.analyzers.authentication import dmarc_passed
 from app.brands import belongs_to
 from app.models import EmailPayload, Finding, Severity
 
@@ -35,7 +36,13 @@ def analyze(email: EmailPayload) -> list[Finding]:
         return []
 
     reply_address = parseaddr(email.reply_to)[1][:80]
-    if reply_domain in FREE_MAIL and from_domain not in FREE_MAIL:
+    # Sharing services (WeTransfer, shared documents, invitations) send on a person's
+    # behalf, set Reply-To to that person and name them in the message. BEC depends on
+    # the reader never seeing where replies go; from a verified sender that shows the
+    # address in the message itself, the redirect is not hidden, so it stays a weak signal.
+    shown = reply_address.lower() in f"{email.subject} {email.body_text}".lower()
+    disclosed = shown and dmarc_passed(email)
+    if reply_domain in FREE_MAIL and from_domain not in FREE_MAIL and not disclosed:
         # An organisation asking for answers at a personal mailbox: classic BEC.
         return [Finding(
             analyzer=NAME, title="Replies go to a personal address",
