@@ -7,6 +7,7 @@ rejected with 422. extra="forbid" rejects fields we did not define.
 """
 import html
 from enum import Enum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -47,7 +48,7 @@ class EmailPayload(BaseModel):
     # The add-on sends at most the first 1,500 characters; the limit here is a ceiling.
     body_text: str = Field(default="", max_length=50_000)
     # Raw Authentication-Results headers, topmost first. Only Google's is trusted.
-    authentication_results: list[str] = Field(default_factory=list, max_length=10)
+    authentication_results: list[Annotated[str, Field(max_length=4_000)]] = Field(default_factory=list, max_length=10)
     links: list[Link] = Field(default_factory=list, max_length=100)
     attachments: list[Attachment] = Field(default_factory=list, max_length=20)
 

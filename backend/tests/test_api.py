@@ -41,3 +41,9 @@ def test_unconfigured_server_refuses_everyone(client, locked, monkeypatch):
     monkeypatch.delenv("ALLOWED_EMAILS")
     r = client.post("/analyze", json=email(), headers={"Authorization": "Bearer x"})
     assert r.status_code == 503
+
+
+def test_each_authentication_header_has_a_length_limit(client):
+    # The list size was limited, but not each header in it.
+    too_long = {"from_header": "a@b.com", "authentication_results": ["x" * 4_001]}
+    assert client.post("/analyze", json=too_long).status_code == 422

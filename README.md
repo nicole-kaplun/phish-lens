@@ -250,7 +250,7 @@ Testing against real Gmail messages, deliberately breaking things, and asking fo
 10. **The server could do far more than its job.** I checked which roles the running service had: Google's default compute account, with **Editor** on the whole project. Anyone who broke into the service could have changed almost anything. It now runs as a dedicated account that can only call Gemini and read the one VirusTotal secret.
 11. **"Works on my machine".** The first deploy crashed: `google-auth` was installed locally but missing from `requirements.txt`. Cloud Run kept the previous revision serving.
 
-**Test suite:** 110 tests, run on every push by GitHub Actions. They never use the network: VirusTotal, RDAP and Gemini are replaced with fakes, so they test my logic, not the services. The live system (deployment, Gemini, the add-on in Gmail) was tested by hand with real emails: legitimate mail, phishing, CEO fraud without a link, and an outside service failing.
+**Test suite:** 111 tests, run on every push by GitHub Actions. They never use the network: VirusTotal, RDAP and Gemini are replaced with fakes, so they test my logic, not the services. The live system (deployment, Gemini, the add-on in Gmail) was tested by hand with real emails: legitimate mail, phishing, CEO fraud without a link, and an outside service failing.
 
 ---
 
@@ -418,6 +418,6 @@ phish-lens/
     │       ├── reputation.py     VirusTotal hash lookup
     │       ├── domain_age.py     RDAP registration date
     │       └── content.py        Gemini, with prompt-injection defences
-    └── tests/                    110 tests, no network: scenarios, validation, auth, look-alikes,
+    └── tests/                    111 tests, no network: scenarios, validation, auth, look-alikes,
                                   Link X-Ray, outside services (faked), review regressions
 ```
